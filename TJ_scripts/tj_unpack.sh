@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Засекаем общее время выполнения
+SECONDS=0
+
 # Получаем количество доступных ядер
 total_cores=$(nproc)
 half_cores=$((total_cores / 2))
@@ -23,8 +26,19 @@ progress() {
     printf "] %3d%%" "$percent"
 }
 
+# Функция для форматирования времени
+format_time() {
+    local seconds=$1
+    local hours=$((seconds / 3600))
+    local minutes=$(( (seconds % 3600) / 60 ))
+    local secs=$((seconds % 60))
+    
+    printf "%02d:%02d:%02d" $hours $minutes $secs
+}
+
 # Шаг 1: Распаковка архивов
 echo "Распаковка архивов *.tar.gz..."
+start_time=$SECONDS
 archives=(*.tar.gz)
 total_archives=${#archives[@]}
 current=0
@@ -45,10 +59,11 @@ for archive in "${archives[@]}"; do
 done
 wait
 ((processed += $(jobs -p | wc -l)))
-printf "\nРаспаковано %d архивов.\n" "$processed"
+printf "\nРаспаковано %d архивов. Время: %s\n" "$processed" "$(format_time $((SECONDS - start_time)))"
 
 # Шаг 2: Удаление маленьких файлов
 echo "Поиск и удаление файлов меньше 10 байт..."
+start_time=$SECONDS
 mapfile -t small_files < <(find . -type f -size -10c)
 total_small=${#small_files[@]}
 current=0
@@ -58,18 +73,20 @@ for file in "${small_files[@]}"; do
     progress $current $total_small "Удаление малых файлов"
     rm -f "$file"
 done
-printf "\nУдалено %d файлов меньше 10 байт.\n" "$total_small"
+printf "\nУдалено %d файлов меньше 10 байт. Время: %s\n" "$total_small" "$(format_time $((SECONDS - start_time)))"
 
 # Шаг 3: Удаление пустых директорий
 echo "Удаление пустых директорий..."
+start_time=$SECONDS
 while IFS= read -r -d '' dir; do
     rmdir "$dir" 2>/dev/null
 done < <(find . -type d -empty -print0)
 empty_count=$(find . -type d -empty | wc -l)
-printf "Осталось пустых директорий: %d\n" "$empty_count"
+printf "Осталось пустых директорий: %d. Время: %s\n" "$empty_count" "$(format_time $((SECONDS - start_time)))"
 
 # Шаг 4: Удаление архивных файлов
 echo "Удаление исходных архивов..."
+start_time=$SECONDS
 archives_count=$(ls *.tar.gz 2>/dev/null | wc -l)
 current=0
 
@@ -78,6 +95,12 @@ for archive in *.tar.gz; do
     progress $current $archives_count "Удаление архивов"
     rm -f "$archive"
 done
-printf "\nУдалено %d архивных файлов.\n" "$archives_count"
+printf "\nУдалено %d архивных файлов. Время: %s\n" "$archives_count" "$(format_time $((SECONDS - start_time)))"
 
+# Общее время выполнения
+total_time=$SECONDS
+echo "======================================"
 echo "Все операции завершены успешно!"
+echo "Общее время выполнения: $(format_time $total_time)"
+
+exit 0
