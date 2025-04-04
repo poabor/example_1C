@@ -130,10 +130,12 @@ if [ -z "$youngest_file" ]; then
 fi
 
 filename=$(basename "$youngest_file")
+file_size=$(du -h "$youngest_file" | cut -f1)  # Получаем размер файла
 
 # Вычисляем контрольную сумму исходного файла
 log "INFO" "\n[1/4] Вычисляем контрольную сумму исходного файла..."
 src_checksum=$(md5sum "$youngest_file" | awk '{print $1}')
+log "INFO" "Файл: $filename (Размер: $file_size)"
 log "INFO" "MD5 исходного файла: $src_checksum"
 
 # Копируем с помощью rsync
@@ -167,8 +169,16 @@ $PATH_1C/1cv8 DESIGNER /S "$SERVER_NAME/$IB_NAME" /N"$DB_USER" /P"$DB_PASS" /Res
 
 if [ $? -eq 0 ]; then
     log "INFO" "1C:Designer завершил работу успешно"
+    
+    # Удаление скопированного файла после успешного выполнения
+    if rm -f "$target_dir/$filename"; then
+        log "INFO" "Файл $filename успешно удален из $target_dir"
+    else
+        log "WARN" "Не удалось удалить файл $filename из $target_dir"
+    fi
 else
     log "ERROR" "1C:Designer завершил работу с ошибкой (код: $?)"
+    exit 1
 fi
 
 log "INFO" "загрузка завершена"
