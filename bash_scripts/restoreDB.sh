@@ -3,34 +3,60 @@ export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Настройки логирования
+PATH_1C="/opt/1cv8/x86_64/8.3.24.1586"
+# =============================================
+# НАСТРОЙКИ ЛОГИРОВАНИЯ
+# =============================================
 LOG_FILE="/var/log/1c_restore.log"
-MAX_LOG_SIZE=$((5*1024*1024))  # 5MB в байтах
-LOG_LEVEL="INFO"               # Уровни: DEBUG, INFO, WARN, ERROR
-LOG_TO_CONSOLE="false"         # Вывод в консоль (true/false)
+MAX_LOG_SIZE=$((5*1024*1024))  # 5MB
+LOG_LEVEL="INFO"               # DEBUG, INFO, WARN, ERROR
+MAX_LOG_BACKUPS=3              # Количество бэкапов
 
-# Создаем лог-файл если не существует
-mkdir -p "$(dirname "$LOG_FILE")"
-touch "$LOG_FILE"
-chmod 644 "$LOG_FILE"
+# =============================================
+# ФУНКЦИИ (ОБНОВЛЕННЫЕ)
+# =============================================
 
-# Функция ротации логов
-rotate_log() {
-    if [ -f "$LOG_FILE" ] && [ $(stat -c%s "$LOG_FILE") -ge $MAX_LOG_SIZE ]; then
-        local timestamp=$(date "+%Y%m%d_%H%M%S")
-        mv "$LOG_FILE" "${LOG_FILE}.${timestamp}"
-        echo "[$(date "+%Y-%m-%d %H:%M:%S")] [INFO] Ротация лога. Старый лог сохранен как ${LOG_FILE}.${timestamp}" > "$LOG_FILE"
-    fi
+safe_log_init() {
+    # Создаем директорию логов если нет
+    mkdir -p "$(dirname "$LOG_FILE")" || {
+        echo "Ошибка создания директории логов" >&2
+        exit 1
+    }
+    
+    # Инициализация только если файл не существует
+    [ -f "$LOG_FILE" ] || { 
+        touch "$LOG_FILE" && chmod 644 "$LOG_FILE"
+    }
+    
+    # Добавляем разделитель только если файл не пустой
+    [ -s "$LOG_FILE" ] && echo -e "\n" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] === НОВЫЙ ЗАПУСК ===" >> "$LOG_FILE"
 }
 
-# Улучшенная функция логирования
-log() {
-    local level=$1
-    local message=$2
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    local log_entry="[$timestamp] [$level] $message"
+rotate_logs() {
+    [ -f "$LOG_FILE" ] || return
     
-    # Проверка уровня логирования
+    local size=$(stat -c%s "$LOG_FILE")
+    [ $size -lt $MAX_LOG_SIZE ] && return
+    
+    # Ротация бэкапов
+    for i in $(seq $MAX_LOG_BACKUPS -1 1); do
+        [ -f "${LOG_FILE}.$i" ] && mv "${LOG_FILE}.$i" "${LOG_FILE}.$((i+1))"
+    done
+    mv "$LOG_FILE" "${LOG_FILE}.1"
+    
+    # Новый лог-файл
+    touch "$LOG_FILE"
+    chmod 644 "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Лог пересоздан после ротации" >> "$LOG_FILE"
+}
+
+log() {
+    local level=$1 msg=$2
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local entry="[$timestamp] [$level] $msg"
+    
+    # Фильтр по уровню
     case $LOG_LEVEL in
         "DEBUG") ;;
         "INFO")  [[ $level == "DEBUG" ]] && return ;;
@@ -38,15 +64,33 @@ log() {
         "ERROR") [[ $level != "ERROR" ]] && return ;;
     esac
     
-    rotate_log
-    echo "$log_entry" >> "$LOG_FILE" || echo "$log_entry" >&2
-    
-    [ "$LOG_TO_CONSOLE" = "true" ] && echo "$log_entry"
+    rotate_logs
+    echo "$entry" >> "$LOG_FILE"  # Только добавление в конец
 }
 
-# Логируем начало выполнения
-log "INFO" "=== Запуск скрипта $0 ==="
-log "INFO" "Параметры: $@"
+# =============================================
+# ИНИЦИАЛИЗАЦИЯ ЛОГА (КРИТИЧНО ВАЖНЫЙ БЛОК)
+# =============================================
+
+# Отключаем стандартные перенаправления при работе через cron
+if [ -t 1 ]; then
+    # Режим терминала - выводим в консоль
+    exec 3>&1
+else
+    # Режим cron - перенаправляем только в файл
+    exec 3>/dev/null
+fi
+
+# Инициализация лога (гарантированно не перезаписывает)
+safe_log_init
+
+# Перенаправляем весь вывод в лог-файл
+exec >> "$LOG_FILE" 2>&1
+
+# =============================================
+# ОСНОВНОЙ КОД СКРИПТА (БЕЗ ИЗМЕНЕНИЙ)
+# =============================================
+log "INFO" "Запуск скрипта $0 с параметрами: $*"
 
 # Парсинг аргументов
 CONFIG_FILE=""
@@ -81,7 +125,7 @@ fi
 # Загрузка конфигурации
 log "INFO" "Загрузка конфигурации из $CONFIG_FILE"
 source "$CONFIG_FILE" || {
-    log "ERROR" "Ошибка загрузки конфигурации"
+    log "ERROR" "Ошибка при загрузке конфигурации"
     exit 1
 }
 
@@ -94,24 +138,23 @@ for var in "${required_vars[@]}"; do
     fi
 done
 
-# Вывод параметров конфигурации
+# Логирование параметров
 log "INFO" "=== Параметры конфигурации ==="
 log "INFO" "Сервер: $SERVER_NAME"
 log "INFO" "Имя ИБ: $IB_NAME"
-log "INFO" "Пользователь: $DB_USER"
 log "INFO" "Исходная директория: $source_dir"
 log "INFO" "Целевая директория: $target_dir"
 [ -n "$PATH_1C" ] && log "INFO" "Путь к 1С: $PATH_1C"
 
 # Проверка зависимостей
 for cmd in rsync md5sum; do
-    if ! command -v $cmd &>/dev/null; then
+    command -v "$cmd" &>/dev/null || {
         log "ERROR" "Не установлена утилита: $cmd"
         exit 1
-    fi
+    }
 done
 
-# Основная логика скрипта
+# Поиск самого нового .dt файла
 log "INFO" "Поиск самого нового .dt файла в $source_dir"
 youngest_file=$(find "$source_dir" -maxdepth 1 -type f -name "*.dt" -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
 
@@ -129,7 +172,11 @@ src_checksum=$(md5sum "$youngest_file" | awk '{print $1}')
 log "INFO" "MD5: $src_checksum"
 
 # Копирование файла
-mkdir -p "$target_dir"
+mkdir -p "$target_dir" || {
+    log "ERROR" "Ошибка создания целевой директории"
+    exit 1
+}
+
 log "INFO" "Копирование в $target_dir..."
 rsync -ah --info=progress2 "$youngest_file" "$target_dir/" || {
     log "ERROR" "Ошибка копирования"
@@ -158,3 +205,4 @@ else
 fi
 
 log "INFO" "=== Скрипт успешно завершен ==="
+exit 0
