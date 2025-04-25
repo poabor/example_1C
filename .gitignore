@@ -1,7 +1,8 @@
 .env
+*.env
 build/
 allure-report/
-
+logs
 ConfigDumpInfo.xml
 build
 out
