@@ -198,7 +198,8 @@ log "INFO" "Запуск 1C:Designer..."
 
 if [ $? -eq 0 ]; then
     log "INFO" "1C:Designer завершил работу успешно"
-    rm -f "$target_dir/$filename" && log "INFO" "Временный файл удален" || log "WARN" "Не удалось удалить временный файл"
+    log "INFO" "файл: $filename (Размер: $file_size) загружен"
+    rm -f "$target_dir/$filename" && log "INFO" "dt файл удален" || log "WARN" "Не удалось удалить dt файл"
 else
     log "ERROR" "1C:Designer завершил работу с ошибкой (код: $?)"
     exit 1
