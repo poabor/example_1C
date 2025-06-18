@@ -2,14 +2,17 @@
 export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export DISPLAY=":0.0"
+export XAUTHORITY=/tmp/.Xauthority
 
-PATH_1C="/opt/1cv8/x86_64/8.3.24.1586"
+PATH_1C="/opt/1cv8/x86_64/8.3.27.1606"
 # =============================================
 # НАСТРОЙКИ ЛОГИРОВАНИЯ
 # =============================================
-LOG_FILE="/var/log/1c_restore.log"
+LOG_FILE="$HOME/logs/1c_restore.log"
+LOG_FILE_1C="$HOME/logs/1c_restore_1c.log"
 MAX_LOG_SIZE=$((5*1024*1024))  # 5MB
-LOG_LEVEL="INFO"               # DEBUG, INFO, WARN, ERROR
+LOG_LEVEL="DEBUG"               # DEBUG, INFO, WARN, ERROR
 MAX_LOG_BACKUPS=3              # Количество бэкапов
 
 # =============================================
@@ -31,6 +34,16 @@ safe_log_init() {
     # Добавляем разделитель только если файл не пустой
     [ -s "$LOG_FILE" ] && echo -e "\n" >> "$LOG_FILE"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === НОВЫЙ ЗАПУСК ===" >> "$LOG_FILE"
+
+    # Инициализация только если файл не существует
+    [ -f "$LOG_FILE_1C" ] || { 
+        touch "$LOG_FILE_1C" && chmod 644 "$LOG_FILE_1C"
+    }
+    
+    # Добавляем разделитель только если файл не пустой
+    [ -s "$LOG_FILE_1C" ] && echo -e "\n" >> "$LOG_FILE_1C"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] === НОВЫЙ ЗАПУСК ===" >> "$LOG_FILE_1C"
+
 }
 
 rotate_logs() {
@@ -192,9 +205,12 @@ if [ "$src_checksum" != "$dest_checksum" ]; then
     exit 1
 fi
 
+# set -x
+# xhost
 # Загрузка в 1С
 log "INFO" "Запуск 1C:Designer..."
-"${PATH_1C:-/opt/1C/v8.3/x86_64}/1cv8" DESIGNER /S "$SERVER_NAME/$IB_NAME" /N"$DB_USER" /P"$DB_PASS" /RestoreIB "$target_dir/$filename"
+"$PATH_1C/1cv8" DESIGNER /S "$SERVER_NAME/$IB_NAME" /N"$DB_USER" /P"$DB_PASS" /Out "$LOG_FILE_1C" /RestoreIB "$target_dir/$filename"
+# set +x
 
 if [ $? -eq 0 ]; then
     log "INFO" "1C:Designer завершил работу успешно"
