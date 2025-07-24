@@ -213,7 +213,7 @@ def main():
         logger.info(f"\nИтоги обновления меток:")
         logger.info(f"Обновлено задач: {updated_count}")
         logger.info(f"Ошибок при обновлении: {labels_error_count}")
-            
+           
     except Exception as e:
         logger.error(f"Общая ошибка: {str(e)}")
         sys.exit(1)
