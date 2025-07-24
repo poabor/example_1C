@@ -45,8 +45,86 @@ def setup_logging():
 
 logger = setup_logging()
 
+def find_issues(jira_client, jql_query):
+    """
+    Поиск задач в Jira по JQL запросу
+    :param jira_client: Объект клиента Jira
+    :param jql_query: JQL запрос для поиска
+    :return: Список найденных задач или None в случае ошибки
+    """
+    try:
+        logger.info(f"Поиск задач по запросу: {jql_query}")
+        issues = jira_client.search_issues(jql_query, expand='changelog')
+        logger.info(f"Найдено {len(issues)} задач")
+        return issues
+    except Exception as e:
+        logger.error(f"Ошибка при поиске задач: {str(e)}")
+        return None
+
+def check_issue_status(jira_client, issue_key):
+    """
+    Проверка статуса задачи и возврат информации о ней
+    :param jira_client: Объект клиента Jira
+    :param issue_key: Ключ задачи (например, PROJ-123)
+    :return: Словарь с информацией о задаче или None в случае ошибки
+    """
+    try:
+        issue = jira_client.issue(issue_key)
+        return {
+            'key': issue.key,
+            'status': issue.fields.status.name,
+            'assignee': str(issue.fields.assignee) if issue.fields.assignee else None,
+            'summary': issue.fields.summary
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при проверке задачи {issue_key}: {str(e)}")
+        return None
+
+def reassign_issues(jira_client, issues):
+    """
+    Переназначение задач на последнего ответственного пользователя
+    :param jira_client: Объект клиента Jira
+    :param issues: Список задач для обработки
+    :return: Кортеж (количество переназначенных задач, количество пропущенных задач)
+    """
+    reassigned_count = 0
+    skipped_count = 0
+    
+    for issue in issues:
+        logger.info(f"\nАнализ задачи: {issue.key}")
+        
+        # Получаем историю изменений
+        changelog = issue.changelog
+        last_human_assignee = None
+        
+        if changelog and changelog.histories:
+            for history in reversed(changelog.histories):
+                for item in history.items:
+                    if item.field == 'assignee':
+                        if (item.toString and 
+                            item.toString != "Не назначен" and
+                            item.toString.lower() != "robot"):
+                            last_human_assignee = item.toString
+                            logger.debug(f"Найден кандидат: {last_human_assignee}")
+                            break
+                if last_human_assignee:
+                    break
+        
+        if last_human_assignee:
+            try:
+                jira_client.assign_issue(issue, last_human_assignee)
+                logger.info(f"УСПЕХ: Задача {issue.key} переназначена на {last_human_assignee}")
+                reassigned_count += 1
+            except Exception as assign_error:
+                logger.error(f"ОШИБКА: Не удалось переназначить {issue.key}: {str(assign_error)}")
+        else:
+            logger.warning(f"ПРОПУСК: Для задачи {issue.key} не найден подходящий пользователь")
+            skipped_count += 1
+    
+    return reassigned_count, skipped_count
+
 def main():
-    logger.info("=== Запуск скрипта переназначения задач ===")
+    logger.info("=== Запуск скрипта работы с Jira ===")
     
     try:
         # Загрузка переменных окружения
@@ -64,56 +142,25 @@ def main():
             logger.error(f"Ошибка подключения к Jira: {str(e)}")
             sys.exit(1)
         
-        # JQL запрос для поиска задач
+        # 1. Переназначение задач, назначенных на robot
         jql_query = 'resolved is EMPTY AND assignee = robot'
-        logger.info(f"Используется JQL запрос: {jql_query}")
+        issues = find_issues(jira, jql_query)
         
-        try:
-            issues = jira.search_issues(jql_query, expand='changelog')
-            logger.info(f"Найдено {len(issues)} задач для анализа")
-            
-            reassigned_count = 0
-            skipped_count = 0
-            
-            for issue in issues:
-                logger.info(f"\nАнализ задачи: {issue.key}")
-                
-                # Получаем историю изменений
-                changelog = issue.changelog
-                last_human_assignee = None
-                
-                if changelog and changelog.histories:
-                    for history in reversed(changelog.histories):
-                        for item in history.items:
-                            if item.field == 'assignee':
-                                if (item.toString and 
-                                    item.toString != "Не назначен" and
-                                    item.toString.lower() != "robot"):
-                                    last_human_assignee = item.toString
-                                    logger.debug(f"Найден кандидат: {last_human_assignee}")
-                                    break
-                        if last_human_assignee:
-                            break
-                
-                if last_human_assignee:
-                    try:
-                        jira.assign_issue(issue, last_human_assignee)
-                        logger.info(f"УСПЕХ: Задача {issue.key} переназначена на {last_human_assignee}")
-                        reassigned_count += 1
-                    except Exception as assign_error:
-                        logger.error(f"ОШИБКА: Не удалось переназначить {issue.key}: {str(assign_error)}")
-                else:
-                    logger.warning(f"ПРОПУСК: Для задачи {issue.key} не найден подходящий пользователь")
-                    skipped_count += 1
-            
-            logger.info(f"\nИтоги работы:")
+        if issues:
+            reassigned_count, skipped_count = reassign_issues(jira, issues)
+            logger.info(f"\nИтоги переназначения:")
             logger.info(f"Всего задач обработано: {len(issues)}")
             logger.info(f"Успешно переназначено: {reassigned_count}")
             logger.info(f"Пропущено: {skipped_count}")
-            
-        except Exception as e:
-            logger.error(f"Критическая ошибка при обработке задач: {str(e)}")
-            sys.exit(1)
+        
+        # 2. Дополнительная операция: проверка статуса конкретной задачи
+        example_issue_key = 'ERP25-261'  # Можно заменить на получение из переменных окружения
+        issue_info = check_issue_status(jira, example_issue_key)
+        if issue_info:
+            logger.info(f"\nИнформация о задаче {example_issue_key}:")
+            logger.info(f"Статус: {issue_info['status']}")
+            logger.info(f"Назначена на: {issue_info['assignee']}")
+            logger.info(f"Краткое описание: {issue_info['summary']}")
             
     except Exception as e:
         logger.error(f"Общая ошибка: {str(e)}")
