@@ -208,7 +208,7 @@ def main():
         logger.info(f"Ошибок при обработке: {error_count}")
         
         # 3. Обновление меток для старых задач 1Линии
-        labels_jql = 'resolved is EMPTY AND labels = 1Линия AND updatedDate <= startOfDay(-5)'
+        labels_jql = 'resolved is EMPTY AND labels = 1Линия AND updatedDate <= startOfDay(-4)'
         updated_count, labels_error_count = update_labels_to_2line(jira, labels_jql)
         logger.info(f"\nИтоги обновления меток:")
         logger.info(f"Обновлено задач: {updated_count}")
