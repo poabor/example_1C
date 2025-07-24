@@ -8,10 +8,10 @@ import sys
 from dotenv import load_dotenv
 
 # Загрузка переменных
-load_dotenv('/cloud/repo/example_1C/python/jira_assigne.env')  # Укажите абсолютный путь
+load_dotenv('/cloud/repo/example_1C/python/jira_assigne.env')
 
 # Настройка путей для логов
-LOG_DIR = os.getenv('LOG_DIR', '/tmp')  # fallback на /tmp если не задано
+LOG_DIR = os.getenv('LOG_DIR', '/tmp')
 LOG_FILE = os.getenv('LOG_FILE', 'jira_script.log')
 
 # Создаем директорию для логов если не существует
@@ -45,7 +45,7 @@ def setup_logging():
 
 logger = setup_logging()
 
-def find_issues(jira_client, jql_query):
+def find_issues(jira_client, jql_query, expand_fields=None):
     """
     Поиск задач в Jira по JQL запросу
     :param jira_client: Объект клиента Jira
@@ -54,24 +54,65 @@ def find_issues(jira_client, jql_query):
     """
     try:
         logger.info(f"Поиск задач по запросу: {jql_query}")
-        issues = jira_client.search_issues(jql_query, expand='changelog')
+        
+        if expand_fields:
+            issues = jira_client.search_issues(jql_query, expand=expand_fields)
+        else:
+            issues = jira_client.search_issues(jql_query)
+            
         logger.info(f"Найдено {len(issues)} задач")
         return issues
     except Exception as e:
         logger.error(f"Ошибка при поиске задач: {str(e)}")
         return None
 
-def clear_admin_assignee(jira_client):
+def update_labels_to_2line(jira_client, jql_query):
     """
-    Поиск задач, назначенных на admin, и очистка поля assignee
+    Изменение меток на "2линия" для задач, соответствующих JQL запросу
     :param jira_client: Объект клиента Jira
-    :return: Кортеж (количество обработанных задач, количество ошибок)
+    :param jql_query: JQL запрос для поиска задач
+    :return: Кортеж (количество обновленных задач, количество ошибок)
     """
-    jql_query = 'resolved is EMPTY AND assignee = admin'
     issues = find_issues(jira_client, jql_query)
     
     if not issues:
-        logger.info("Не найдено задач, назначенных на admin")
+        logger.info(f"Не найдено задач по запросу: {jql_query}")
+        return 0, 0
+    
+    updated_count = 0
+    error_count = 0
+    
+    for issue in issues:
+        try:
+            # Получаем текущие метки
+            current_labels = issue.fields.labels
+            
+            # Удаляем метку "1Линия" если она есть
+            if '1Линия' in current_labels:
+                current_labels.remove('1Линия')
+            
+            # Добавляем метку "2линия" если её ещё нет
+            if '2линия' not in current_labels:
+                current_labels.append('2линия')
+            
+            # Обновляем задачу
+            issue.update(fields={'labels': current_labels})
+            logger.info(f"УСПЕХ: Метки обновлены для задачи {issue.key}: {current_labels}")
+            updated_count += 1
+        except Exception as e:
+            logger.error(f"ОШИБКА: Не удалось обновить метки для задачи {issue.key}: {str(e)}")
+            error_count += 1
+    
+    return updated_count, error_count
+
+def clear_assignee(jira_client, jql_query):
+    """
+    Очистка поля assignee для задач, найденных по JQL запросу
+    """
+    issues = find_issues(jira_client, jql_query)
+    
+    if not issues:
+        logger.info(f"Не найдено задач по запросу: {jql_query}")
         return 0, 0
     
     processed_count = 0
@@ -79,7 +120,6 @@ def clear_admin_assignee(jira_client):
     
     for issue in issues:
         try:
-            # Очищаем assignee (назначаем на None)
             jira_client.assign_issue(issue, None)
             logger.info(f"УСПЕХ: Поле assignee очищено для задачи {issue.key}")
             processed_count += 1
@@ -89,20 +129,22 @@ def clear_admin_assignee(jira_client):
     
     return processed_count, error_count
 
-def reassign_issues(jira_client, issues):
+def reassign_to_last_human(jira_client, jql_query):
     """
     Переназначение задач на последнего ответственного пользователя
-    :param jira_client: Объект клиента Jira
-    :param issues: Список задач для обработки
-    :return: Кортеж (количество переназначенных задач, количество пропущенных задач)
     """
+    issues = find_issues(jira_client, jql_query, expand_fields='changelog')
+    
+    if not issues:
+        logger.info(f"Не найдено задач по запросу: {jql_query}")
+        return 0, 0
+    
     reassigned_count = 0
     skipped_count = 0
     
     for issue in issues:
         logger.info(f"\nАнализ задачи: {issue.key}")
         
-        # Получаем историю изменений
         changelog = issue.changelog
         last_human_assignee = None
         
@@ -152,21 +194,25 @@ def main():
             sys.exit(1)
         
         # 1. Переназначение задач, назначенных на robot
-        jql_query = 'resolved is EMPTY AND assignee = robot'
-        issues = find_issues(jira, jql_query)
-        
-        if issues:
-            reassigned_count, skipped_count = reassign_issues(jira, issues)
-            logger.info(f"\nИтоги переназначения:")
-            logger.info(f"Всего задач обработано: {len(issues)}")
-            logger.info(f"Успешно переназначено: {reassigned_count}")
-            logger.info(f"Пропущено: {skipped_count}")
+        robot_jql = 'resolved is EMPTY AND assignee = robot'
+        reassigned_count, skipped_count = reassign_to_last_human(jira, robot_jql)
+        logger.info(f"\nИтоги переназначения:")
+        logger.info(f"Успешно переназначено: {reassigned_count}")
+        logger.info(f"Пропущено: {skipped_count}")
         
         # 2. Очистка assignee для задач, назначенных на admin
-        processed_count, error_count = clear_admin_assignee(jira)
+        admin_jql = 'resolved is EMPTY AND assignee = admin'
+        processed_count, error_count = clear_assignee(jira, admin_jql)
         logger.info(f"\nИтоги очистки assignee:")
         logger.info(f"Обработано задач: {processed_count}")
         logger.info(f"Ошибок при обработке: {error_count}")
+        
+        # 3. Обновление меток для старых задач 1Линии
+        labels_jql = 'resolved is EMPTY AND labels = 1Линия AND updatedDate <= startOfDay(-5)'
+        updated_count, labels_error_count = update_labels_to_2line(jira, labels_jql)
+        logger.info(f"\nИтоги обновления меток:")
+        logger.info(f"Обновлено задач: {updated_count}")
+        logger.info(f"Ошибок при обновлении: {labels_error_count}")
             
     except Exception as e:
         logger.error(f"Общая ошибка: {str(e)}")
