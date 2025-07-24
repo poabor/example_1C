@@ -61,24 +61,33 @@ def find_issues(jira_client, jql_query):
         logger.error(f"Ошибка при поиске задач: {str(e)}")
         return None
 
-def check_issue_status(jira_client, issue_key):
+def clear_admin_assignee(jira_client):
     """
-    Проверка статуса задачи и возврат информации о ней
+    Поиск задач, назначенных на admin, и очистка поля assignee
     :param jira_client: Объект клиента Jira
-    :param issue_key: Ключ задачи (например, PROJ-123)
-    :return: Словарь с информацией о задаче или None в случае ошибки
+    :return: Кортеж (количество обработанных задач, количество ошибок)
     """
-    try:
-        issue = jira_client.issue(issue_key)
-        return {
-            'key': issue.key,
-            'status': issue.fields.status.name,
-            'assignee': str(issue.fields.assignee) if issue.fields.assignee else None,
-            'summary': issue.fields.summary
-        }
-    except Exception as e:
-        logger.error(f"Ошибка при проверке задачи {issue_key}: {str(e)}")
-        return None
+    jql_query = 'resolved is EMPTY AND assignee = admin'
+    issues = find_issues(jira_client, jql_query)
+    
+    if not issues:
+        logger.info("Не найдено задач, назначенных на admin")
+        return 0, 0
+    
+    processed_count = 0
+    error_count = 0
+    
+    for issue in issues:
+        try:
+            # Очищаем assignee (назначаем на None)
+            jira_client.assign_issue(issue, None)
+            logger.info(f"УСПЕХ: Поле assignee очищено для задачи {issue.key}")
+            processed_count += 1
+        except Exception as e:
+            logger.error(f"ОШИБКА: Не удалось очистить assignee для задачи {issue.key}: {str(e)}")
+            error_count += 1
+    
+    return processed_count, error_count
 
 def reassign_issues(jira_client, issues):
     """
@@ -153,14 +162,11 @@ def main():
             logger.info(f"Успешно переназначено: {reassigned_count}")
             logger.info(f"Пропущено: {skipped_count}")
         
-        # 2. Дополнительная операция: проверка статуса конкретной задачи
-        example_issue_key = 'ERP25-261'  # Можно заменить на получение из переменных окружения
-        issue_info = check_issue_status(jira, example_issue_key)
-        if issue_info:
-            logger.info(f"\nИнформация о задаче {example_issue_key}:")
-            logger.info(f"Статус: {issue_info['status']}")
-            logger.info(f"Назначена на: {issue_info['assignee']}")
-            logger.info(f"Краткое описание: {issue_info['summary']}")
+        # 2. Очистка assignee для задач, назначенных на admin
+        processed_count, error_count = clear_admin_assignee(jira)
+        logger.info(f"\nИтоги очистки assignee:")
+        logger.info(f"Обработано задач: {processed_count}")
+        logger.info(f"Ошибок при обработке: {error_count}")
             
     except Exception as e:
         logger.error(f"Общая ошибка: {str(e)}")
