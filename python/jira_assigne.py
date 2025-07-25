@@ -174,6 +174,56 @@ def reassign_to_last_human(jira_client, jql_query):
     
     return reassigned_count, skipped_count
 
+def transition_issues_to_todo(jira_client, jql_query):
+    """
+    Переводит задачи из статуса 'In Progress' в 'To Do'
+    :param jira_client: Объект клиента Jira
+    :param jql_query: JQL запрос для поиска задач
+    :return: Кортеж (количество успешных переходов, количество ошибок)
+    """
+    issues = find_issues(jira_client, jql_query)
+    
+    if not issues:
+        logger.info(f"Не найдено задач по запросу: {jql_query}")
+        return 0, 0
+    
+    success_count = 0
+    error_count = 0
+    
+    for issue in issues:
+        try:
+            # Получаем доступные переходы для задачи
+            transitions = jira_client.transitions(issue)
+            
+            # Находим переход из 'In Progress' в 'To Do'
+            todo_transition = None
+            for transition in transitions:
+                # Исправленный способ проверки имени статуса
+                to_status = transition.get('to', {})
+                if isinstance(to_status, str):
+                    status_name = to_status
+                else:
+                    status_name = to_status.get('name', '')
+                
+                if status_name.lower() == 'to do':
+                    todo_transition = transition
+                    break
+            
+            if todo_transition:
+                # Выполняем переход
+                jira_client.transition_issue(issue, todo_transition['id'])
+                logger.info(f"УСПЕХ: Задача {issue.key} переведена в 'To Do'")
+                success_count += 1
+            else:
+                logger.warning(f"ПРЕДУПРЕЖДЕНИЕ: Для задачи {issue.key} не найден переход в 'To Do'. Доступные переходы: {[t.get('to', {}).get('name', '?') for t in transitions]}")
+                error_count += 1
+                
+        except Exception as e:
+            logger.error(f"ОШИБКА: Не удалось перевести задачу {issue.key}: {str(e)}")
+            error_count += 1
+    
+    return success_count, error_count
+
 def main():
     logger.info("=== Запуск скрипта работы с Jira ===")
     
@@ -213,6 +263,13 @@ def main():
         logger.info(f"\nИтоги обновления меток:")
         logger.info(f"Обновлено задач: {updated_count}")
         logger.info(f"Ошибок при обновлении: {labels_error_count}")
+
+        # 4. Перевод задач из In Progress в To Do (новый функционал)
+        progress_jql = 'status = "In Progress" AND updatedDate >= startOfDay(-3)'
+        transitioned_count, transition_errors = transition_issues_to_todo(jira, progress_jql)
+        logger.info(f"\nИтоги перевода статусов:")
+        logger.info(f"Успешно переведено: {transitioned_count}")
+        logger.info(f"Ошибок при переводе: {transition_errors}")
            
     except Exception as e:
         logger.error(f"Общая ошибка: {str(e)}")
