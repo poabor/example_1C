@@ -250,12 +250,12 @@ def main():
         logger.info(f"Успешно переназначено: {reassigned_count}")
         logger.info(f"Пропущено: {skipped_count}")
         
-        # # 2. Очистка assignee для задач, назначенных на admin
-        # admin_jql = 'resolved is EMPTY AND assignee = admin'
-        # processed_count, error_count = clear_assignee(jira, admin_jql)
-        # logger.info(f"\nИтоги очистки assignee:")
-        # logger.info(f"Обработано задач: {processed_count}")
-        # logger.info(f"Ошибок при обработке: {error_count}")
+        # 2. Очистка assignee для задач, назначенных на admin
+        admin_jql = 'resolved is EMPTY AND assignee = admin'
+        processed_count, error_count = clear_assignee(jira, admin_jql)
+        logger.info(f"\nИтоги очистки assignee:")
+        logger.info(f"Обработано задач: {processed_count}")
+        logger.info(f"Ошибок при обработке: {error_count}")
         
         # 3. Обновление меток для старых задач 1Линии
         labels_jql = 'resolved is EMPTY AND labels = 1Линия AND updatedDate <= startOfDay(-4)'
