@@ -265,7 +265,7 @@ def main():
         logger.info(f"Ошибок при обновлении: {labels_error_count}")
 
         # 4. Перевод задач из In Progress в To Do (новый функционал)
-        progress_jql = 'status = "In Progress" AND updatedDate >= startOfDay(-3)'
+        progress_jql = 'status = "In Progress" AND updatedDate <= startOfDay(-3)'
         transitioned_count, transition_errors = transition_issues_to_todo(jira, progress_jql)
         logger.info(f"\nИтоги перевода статусов:")
         logger.info(f"Успешно переведено: {transitioned_count}")
