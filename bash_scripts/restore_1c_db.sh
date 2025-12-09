@@ -1,9 +1,10 @@
 #!/bin/bash
+# пример запуска: restoreDB.sh -c /cloud/repo/example_1C/build/OB_test1csrv.cfg
 export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export DISPLAY=":0.0"
-export XAUTHORITY=/tmp/.Xauthority
+#export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+#export DISPLAY=":0.0"
+#export XAUTHORITY=/tmp/.Xauthority
 
 PATH_1C="/opt/1cv8/x86_64/8.3.27.1606"
 # =============================================
@@ -191,7 +192,18 @@ mkdir -p "$target_dir" || {
 }
 
 log "INFO" "Копирование в $target_dir..."
-rsync -ah --info=progress2 "$youngest_file" "$target_dir/" || {
+{
+    rsync -ah "$youngest_file" "$target_dir/" &
+    RSYNC_PID=$!
+    
+    # Выводим сообщение каждую минуту
+    while kill -0 $RSYNC_PID 2>/dev/null; do
+        echo "$(date): Копирование выполняется..."
+        sleep 180
+    done
+    
+    wait $RSYNC_PID
+} || {
     log "ERROR" "Ошибка копирования"
     exit 1
 }
@@ -209,8 +221,7 @@ fi
 # xhost
 # Загрузка в 1С
 log "INFO" "Загрузка dt"
-# "$PATH_1C/1cv8/ibcmd" infobase restore --db-server="$SERVER_NAME" --dbms=PostgreSQL --db-name="$IB_NAME" --db-user="$PG_USER" --db-pwd="$PG_PWD" --user=""$DB_USER"" --password=""$DB_PASS"" "$target_dir/$filename"
-"$PATH_1C/1cv8" DESIGNER /S "$SERVER_NAME/$IB_NAME" /N"$DB_USER" /P"$DB_PASS" /Out "$LOG_FILE_1C" /RestoreIB "$target_dir/$filename"
+"$PATH_1C/ibcmd" infobase restore --db-server="$SERVER_NAME" --dbms=PostgreSQL --db-name="$IB_NAME" --db-user="$PG_USER" --db-pwd="$PG_PWD" --user=""$DB_USER"" --password=""$DB_PASS"" "$target_dir/$filename"
 # set +x
 
 if [ $? -eq 0 ]; then
