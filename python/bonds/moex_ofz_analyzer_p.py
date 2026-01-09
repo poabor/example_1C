@@ -167,6 +167,7 @@ def main():
   # ✅ ОКОНЧАТЕЛЬНОЕ УБИРАНИЕ ДУБЛИКАТОВ ПО ТИКЕРУ
     df = df.drop_duplicates(subset=['Тикер'], keep='first')
 
+
     # Сортировка: по доходности убывание, затем по цене убывание
     # df = df.sort_values(by=['Цена', 'Стоимость купона', 'Доходность (%)'], ascending=[True, False, False])
     df = df.sort_values(by=['кол-во купонов для +1', 'Цена', 'Стоимость купона'], ascending=[True, True, False])
